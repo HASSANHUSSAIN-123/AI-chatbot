@@ -2,15 +2,10 @@ import os
 import json
 import hashlib
 import html
-
 import streamlit as st
 from groq import Groq
 
-
-# ============================================================
 # PAGE CONFIG
-# ============================================================
-
 st.set_page_config(
     page_title="AI Assistant",
     page_icon="🤖",
@@ -18,26 +13,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-# ============================================================
 # CONFIGURATION
-# ============================================================
-
 CHAT_MODEL = os.getenv(
     "GROQ_MODEL",
     "openai/gpt-oss-120b"
 )
 
 WHISPER_MODEL = "whisper-large-v3-turbo"
-
 MAX_MESSAGE_LENGTH = 4000
 MAX_HISTORY_MESSAGES = 30
 
-
-# ============================================================
 # SYSTEM PROMPT
-# ============================================================
-
 SYSTEM_PROMPT = """
 You are a helpful, intelligent, friendly AI assistant.
 
@@ -71,50 +57,28 @@ STYLE:
 - Use headings, bullets, tables, and code blocks when they improve readability.
 """
 
-
-# ============================================================
 # API KEY
-# ============================================================
-
 def get_api_key():
-    """
-    Get Groq API key from:
-    1. Environment variable
-    2. Streamlit secrets
-    """
-
     api_key = os.getenv("GROQ_API_KEY")
-
     if api_key:
         return api_key
-
     try:
         api_key = st.secrets.get("GROQ_API_KEY")
         if api_key:
             return api_key
     except Exception:
         pass
-
     return None
-
 
 API_KEY = get_api_key()
 
-
-# ============================================================
 # GROQ CLIENT
-# ============================================================
-
 if API_KEY:
     client = Groq(api_key=API_KEY)
 else:
     client = None
 
-
-# ============================================================
 # SESSION STATE
-# ============================================================
-
 if "chats" not in st.session_state:
     st.session_state.chats = {}
 
@@ -127,13 +91,8 @@ if "last_audio_hash" not in st.session_state:
 if "voice_output" not in st.session_state:
     st.session_state.voice_output = True
 
-
-# ============================================================
 # CHAT MANAGEMENT
-# ============================================================
-
 def create_new_chat():
-    """Create a new empty conversation."""
 
     chat_id = hashlib.sha256(
         os.urandom(32)
@@ -146,24 +105,17 @@ def create_new_chat():
 
     st.session_state.current_chat_id = chat_id
 
-
+    return chat_id
 def get_current_chat():
-    """Return current chat."""
 
     chat_id = st.session_state.current_chat_id
-
     if chat_id is None:
         create_new_chat()
         chat_id = st.session_state.current_chat_id
-
     return st.session_state.chats[chat_id]
 
-
 def generate_chat_title(text):
-    """Generate a simple title from first user message."""
-
     text = text.strip()
-
     if not text:
         return "New Chat"
 
@@ -177,19 +129,28 @@ def generate_chat_title(text):
     return text
 
 
-def delete_current_chat():
-    """Delete current conversation."""
+def delete_chat(chat_id):
+    """Delete a specific conversation."""
 
-    chat_id = st.session_state.current_chat_id
+    if chat_id not in st.session_state.chats:
+        return
 
-    if chat_id in st.session_state.chats:
-        del st.session_state.chats[chat_id]
+    # Delete selected chat
+    del st.session_state.chats[chat_id]
 
-    st.session_state.current_chat_id = None
+    if st.session_state.current_chat_id == chat_id:
+        if st.session_state.chats:
+            # Open the most recent remaining chat
+            remaining_ids = list(
+                st.session_state.chats.keys()
+            )
+            st.session_state.current_chat_id = (
+                remaining_ids[-1]
+            )
 
-    # Create a fresh chat
-    create_new_chat()
-
+        else:
+            # Never leave the application without a chat
+            create_new_chat()
 
 # Create first chat
 if not st.session_state.chats:
@@ -198,14 +159,9 @@ if not st.session_state.chats:
 if st.session_state.current_chat_id not in st.session_state.chats:
     create_new_chat()
 
-
 current_chat = get_current_chat()
 
-
-# ============================================================
 # CSS
-# ============================================================
-
 st.markdown(
     """
     <style>
@@ -274,36 +230,44 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
 # SIDEBAR
-# ============================================================
-
 with st.sidebar:
 
-    st.title("Chats")
+    st.title(" Chats")
 
-    # --------------------------------------------------------
-    # NEW CHAT
-    # --------------------------------------------------------
+    current_chat = get_current_chat()
+    # Check whether current chat contains a conversation
+    has_conversation = len(
+        current_chat["messages"]
+    ) > 0
 
     if st.button(
-        "New Chat",
+        " New Chat",
         use_container_width=True,
-        type="primary"
+        type="primary",
+        disabled=not has_conversation,
     ):
+
         create_new_chat()
         st.rerun()
 
-    st.divider()
+    # Explain why New Chat is disabled
+    if not has_conversation:
 
-    # --------------------------------------------------------
-    # CHAT HISTORY
-    # --------------------------------------------------------
+        st.caption(
+            "Start a conversation before creating a new chat."
+        )
+
+    st.divider()
 
     st.markdown("###  History")
 
-    chat_items = list(st.session_state.chats.items())
+    chat_items = list(
+        st.session_state.chats.items()
+    )
+
+    # Newest first
+    chat_items.reverse()
 
     if not chat_items:
 
@@ -311,55 +275,66 @@ with st.sidebar:
 
     else:
 
-        # Newest/current chats first
-        chat_items.reverse()
-
         for chat_id, chat in chat_items:
 
             title = chat["title"]
 
-            if len(title) > 32:
-                title = title[:32] + "..."
+            if len(title) > 27:
+                title = title[:27] + "..."
 
             is_current = (
-                chat_id == st.session_state.current_chat_id
+                chat_id
+                == st.session_state.current_chat_id
             )
 
-            button_text = (
-                f" {title}"
-                if is_current
-                else f" {title}"
+            chat_column, delete_column = st.columns(
+                [0.86, 0.14],
+                gap="small"
             )
 
-            if st.button(
-                button_text,
-                key=f"chat_{chat_id}",
-                use_container_width=True
-            ):
+            with chat_column:
 
-                st.session_state.current_chat_id = chat_id
-                st.session_state.last_audio_hash = None
-                st.rerun()
+                if is_current:
+
+                    button_text = f" {title}"
+
+                else:
+
+                    button_text = f" {title}"
+
+                if st.button(
+                    button_text,
+                    key=f"open_chat_{chat_id}",
+                    use_container_width=True,
+                ):
+
+                    st.session_state.current_chat_id = (
+                        chat_id
+                    )
+
+                    st.session_state.last_audio_hash = (
+                        None
+                    )
+
+                    st.rerun()
+
+            with delete_column:
+
+                if st.button(
+                    "✕",
+                    key=f"delete_chat_{chat_id}",
+                    help="Delete this chat",
+                ):
+
+                    delete_chat(chat_id)
+
+                    st.session_state.last_audio_hash = (
+                        None
+                    )
+
+                    st.rerun()
 
     st.divider()
-
-    # --------------------------------------------------------
-    # CURRENT CHAT ACTIONS
-    # --------------------------------------------------------
-
-    st.markdown("###  Current Chat")
-
-    if st.button(
-        "🗑️ Delete Current Chat",
-        use_container_width=True
-    ):
-
-        delete_current_chat()
-        st.rerun()
-
-    # --------------------------------------------------------
-    # VOICE OUTPUT
-    # --------------------------------------------------------
 
     st.session_state.voice_output = st.checkbox(
         "🔊 Enable voice output",
@@ -369,13 +344,8 @@ with st.sidebar:
     st.divider()
 
     st.caption(
-        "Chats are stored in the current Streamlit session."
+        "Developed by Hassan Hussain."
     )
-
-
-# ============================================================
-# MAIN HEADER
-# ============================================================
 
 st.markdown(
     """
@@ -388,11 +358,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
-
-# ============================================================
-# API STATUS
-# ============================================================
 
 if client:
 
@@ -414,13 +379,7 @@ else:
         """
     )
 
-
 st.divider()
-
-
-# ============================================================
-# DISPLAY CURRENT CHAT
-# ============================================================
 
 for message in current_chat["messages"]:
 
@@ -430,11 +389,6 @@ for message in current_chat["messages"]:
     with st.chat_message(role):
 
         st.markdown(content)
-
-
-# ============================================================
-# FUNCTIONS
-# ============================================================
 
 def validate_message(message):
     """Validate user input."""
@@ -492,7 +446,6 @@ def transcribe_audio(audio_bytes):
 
     return text
 
-
 def get_ai_response():
 
     if not client:
@@ -506,7 +459,6 @@ def get_ai_response():
             "content": SYSTEM_PROMPT
         }
     ]
-
     # Keep recent context
     recent_messages = current_chat["messages"][
         -MAX_HISTORY_MESSAGES:
@@ -570,38 +522,18 @@ def speak_text(text):
         height=0
     )
 
-
-# ============================================================
-# INPUT AREA
-# ============================================================
-
 st.markdown("###")
-
-
-# Two-column input:
-# LEFT  = typing
-# RIGHT = microphone
 
 text_column, voice_column = st.columns(
     [0.88, 0.12],
     vertical_alignment="bottom"
 )
 
-
-# ------------------------------------------------------------
-# TEXT INPUT
-# ------------------------------------------------------------
-
 with text_column:
 
     text_prompt = st.chat_input(
         "Type your message..."
     )
-
-
-# ------------------------------------------------------------
-# VOICE INPUT
-# ------------------------------------------------------------
 
 with voice_column:
 
@@ -611,11 +543,6 @@ with voice_column:
         key="voice_recorder",
         label_visibility="collapsed",
     )
-
-
-# ============================================================
-# HANDLE TEXT MESSAGE
-# ============================================================
 
 if text_prompt is not None:
 
@@ -687,11 +614,6 @@ if text_prompt is not None:
         # Rerun so sidebar title updates
         st.rerun()
 
-
-# ============================================================
-# HANDLE VOICE MESSAGE
-# ============================================================
-
 if audio_value is not None:
 
     try:
@@ -703,10 +625,6 @@ if audio_value is not None:
             audio_bytes
         ).hexdigest()
 
-        # IMPORTANT:
-        # Streamlit reruns the script after recording.
-        # This prevents the same recording from being
-        # transcribed multiple times.
         if (
             audio_hash
             != st.session_state.last_audio_hash
@@ -728,10 +646,6 @@ if audio_value is not None:
 
             else:
 
-                # ------------------------------------------------
-                # TRANSCRIBE
-                # ------------------------------------------------
-
                 with st.spinner(
                     "🎙️ Transcribing your voice..."
                 ):
@@ -750,10 +664,6 @@ if audio_value is not None:
                         )
 
                         voice_text = None
-
-                # ------------------------------------------------
-                # SEND TRANSCRIPTION TO AI
-                # ------------------------------------------------
 
                 if voice_text:
 
@@ -791,10 +701,6 @@ if audio_value is not None:
                                     voice_text
                                 )
                             )
-
-                        # ------------------------------------------------
-                        # AI RESPONSE
-                        # ------------------------------------------------
 
                         with st.chat_message(
                             "assistant"
@@ -851,11 +757,6 @@ if audio_value is not None:
             "processing the voice message.\n\n"
             f"{str(error)}"
         )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
 
 st.markdown(
     """
